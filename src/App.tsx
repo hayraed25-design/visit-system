@@ -728,6 +728,19 @@ function App() {
     setSavingVisit,
   ] = useState(false);
 
+  const [showVisitEditForm, setShowVisitEditForm] = useState(false);
+  const [editingVisitId, setEditingVisitId] = useState<number | null>(null);
+  const [editVisitorName, setEditVisitorName] = useState("");
+  const [editVisitorPhone, setEditVisitorPhone] = useState("");
+  const [editVisitorEmail, setEditVisitorEmail] = useState("");
+  const [editVisitCompanyId, setEditVisitCompanyId] = useState<number | null>(null);
+  const [editVisitCompanyName, setEditVisitCompanyName] = useState("");
+  const [editRequestedEmployee, setEditRequestedEmployee] = useState("");
+  const [editVisitReason, setEditVisitReason] = useState("");
+  const [editVisitDate, setEditVisitDate] = useState("");
+  const [editVisitError, setEditVisitError] = useState("");
+  const [savingVisitEdit, setSavingVisitEdit] = useState(false);
+
   /* =========================
      نموذج الشركة
   ========================= */
@@ -788,6 +801,8 @@ function App() {
     reportCompany,
     setReportCompany,
   ] = useState("all");
+
+  const [reportCompanySearch, setReportCompanySearch] = useState("");
 
   const [
     reportStatus,
@@ -1651,6 +1666,38 @@ function App() {
     setSavingCompany(false);
   };
 
+  const toggleCompanyActive = async (company: Company) => {
+    const nextActive = !company.active;
+    const actionText = nextActive ? "إعادة تفعيل" : "تعطيل";
+
+    if (!window.confirm(`هل أنت متأكد من ${actionText} الشركة «${company.name}»؟`)) {
+      return;
+    }
+
+    const result = await supabase
+      .from("companies")
+      .update({ active: nextActive })
+      .eq("id", company.id)
+      .select("id, name, active")
+      .single();
+
+    if (result.error) {
+      setCompanyError(result.error.message);
+      return;
+    }
+
+    const updated = result.data as Company;
+    setCompanies((prev) =>
+      prev
+        .map((item) => item.id === updated.id ? updated : item)
+        .sort((a, b) => a.name.localeCompare(b.name, "ar")),
+    );
+
+    setSelectedCompanyPage((prev) =>
+      prev && prev.id === updated.id ? updated : prev,
+    );
+  };
+
   /* =========================
      حفظ زيارة
   ========================= */
@@ -1908,13 +1955,88 @@ function App() {
   const openVisitDetails = (
     visit: Visit,
   ) => {
-    setSelectedVisit(
-      visit,
-    );
+    setSelectedVisit(visit);
+    setCurrentPage("visitDetails");
+  };
 
-    setCurrentPage(
-      "visitDetails",
-    );
+  const openEditVisit = (visit: Visit) => {
+    setEditingVisitId(visit.id);
+    setEditVisitorName(visit.visitorName);
+    setEditVisitorPhone(visit.visitorPhone);
+    setEditVisitorEmail(visit.visitorEmail);
+    setEditVisitCompanyId(visit.companyId);
+    setEditVisitCompanyName(visit.companyId ? "" : (visit.company === "شخصي" ? "" : visit.company));
+    setEditRequestedEmployee(visit.employee);
+    setEditVisitReason(visit.reason);
+    setEditVisitDate(visit.visitDate);
+    setEditVisitError("");
+    setShowVisitEditForm(true);
+  };
+
+  const closeEditVisit = () => {
+    if (savingVisitEdit) return;
+    setShowVisitEditForm(false);
+    setEditVisitError("");
+  };
+
+  const saveEditVisit = async () => {
+    if (!editingVisitId) return;
+    if (!editVisitorName.trim() || !editRequestedEmployee.trim() || !editVisitReason.trim() || !editVisitDate) {
+      setEditVisitError("أكمل اسم الزائر والشخص المطلوب والغرض وتاريخ الزيارة");
+      return;
+    }
+
+    setSavingVisitEdit(true);
+    setEditVisitError("");
+
+    const isPersonal = editVisitCompanyId === null && !editVisitCompanyName.trim();
+    const result = await supabase
+      .from("visits")
+      .update({
+        visitor_name: editVisitorName.trim(),
+        visitor_phone: editVisitorPhone.trim() || null,
+        visitor_email: editVisitorEmail.trim() || null,
+        company_id: editVisitCompanyId,
+        other_company_name: isPersonal ? "شخصي" : (editVisitCompanyId === null ? editVisitCompanyName.trim() : null),
+        requested_employee: editRequestedEmployee.trim(),
+        visit_reason: editVisitReason.trim(),
+        visit_date: editVisitDate,
+      })
+      .eq("id", editingVisitId)
+      .select("id, visit_no, visitor_name, visitor_phone, visitor_email, company_id, other_company_name, requested_employee, visit_reason, visit_date, check_in_at, check_out_at, status")
+      .single();
+
+    if (result.error) {
+      setEditVisitError(result.error.message);
+      setSavingVisitEdit(false);
+      return;
+    }
+
+    const row: any = result.data;
+    const companyName = row.company_id !== null
+      ? companies.find((company) => company.id === row.company_id)?.name || ""
+      : row.other_company_name || "شخصي";
+
+    const updatedVisit: Visit = {
+      id: row.id,
+      visitNo: row.visit_no || `V-${String(row.id).padStart(6, "0")}`,
+      visitorName: row.visitor_name || "",
+      visitorPhone: row.visitor_phone || "",
+      visitorEmail: row.visitor_email || "",
+      company: companyName,
+      companyId: row.company_id ?? null,
+      employee: row.requested_employee || "",
+      reason: row.visit_reason || "",
+      visitDate: row.visit_date || "",
+      checkIn: row.check_in_at || null,
+      checkOut: row.check_out_at || null,
+      status: row.status || "waiting",
+    };
+
+    setVisits((prev) => prev.map((item) => item.id === updatedVisit.id ? updatedVisit : item));
+    setSelectedVisit(updatedVisit);
+    setShowVisitEditForm(false);
+    setSavingVisitEdit(false);
   };
 
   /* =========================
@@ -2926,13 +3048,11 @@ function App() {
             visit.visitDate <=
               reportTo;
 
+          const companySearch = reportCompanySearch.trim().toLowerCase();
           const matchCompany =
-            reportCompany ===
-              "all" ||
-            String(
-              visit.companyId,
-            ) ===
-              reportCompany;
+            reportCompany === "all" || String(visit.companyId) === reportCompany;
+          const matchCompanySearch =
+            !companySearch || visit.company.toLowerCase().includes(companySearch);
 
           const matchStatus =
             reportStatus ===
@@ -2944,6 +3064,7 @@ function App() {
             matchFrom &&
             matchTo &&
             matchCompany &&
+            matchCompanySearch &&
             matchStatus
           );
         },
@@ -2953,6 +3074,7 @@ function App() {
       reportFrom,
       reportTo,
       reportCompany,
+      reportCompanySearch,
       reportStatus,
     ]);
 
@@ -4620,6 +4742,15 @@ function App() {
                                   >
                                     تعديل
                                   </button>
+
+                                  <button
+                                    type="button"
+                                    className="action-button"
+                                    style={{ marginRight: "6px" }}
+                                    onClick={() => void toggleCompanyActive(company)}
+                                  >
+                                    {company.active ? "تعطيل" : "تفعيل"}
+                                  </button>
                                 </td>
                               </tr>
                             );
@@ -5109,6 +5240,13 @@ function App() {
                 <div className="top-actions">
                   <button
                     type="button"
+                    className="new-visit"
+                    onClick={() => openEditVisit(selectedVisit)}
+                  >
+                    تعديل الزيارة
+                  </button>
+                  <button
+                    type="button"
                     className="view-all"
                     onClick={
                       backToVisits
@@ -5280,6 +5418,32 @@ function App() {
               </section>
             </>
           )}
+
+        {showVisitEditForm && selectedVisit && (
+          <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.35)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,padding:"20px"}}>
+            <div style={{background:"#fff",borderRadius:"16px",width:"min(760px, 100%)",maxHeight:"90vh",overflowY:"auto",padding:"24px",boxShadow:"0 20px 50px rgba(0,0,0,.18)"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"20px"}}>
+                <div><h2 style={{margin:0}}>تعديل الزيارة</h2><p style={{margin:"6px 0 0",color:"#6b7280"}}>{selectedVisit.visitNo}</p></div>
+                <button type="button" className="view-all" onClick={closeEditVisit}>إغلاق</button>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:"14px"}}>
+                <label>اسم الزائر<input value={editVisitorName} onChange={e=>setEditVisitorName(e.target.value)} style={formInputStyle}/></label>
+                <label>رقم الهاتف<input value={editVisitorPhone} onChange={e=>setEditVisitorPhone(e.target.value)} style={formInputStyle}/></label>
+                <label>البريد الإلكتروني<input type="email" value={editVisitorEmail} onChange={e=>setEditVisitorEmail(e.target.value)} style={formInputStyle}/></label>
+                <label>تاريخ الزيارة<input type="date" value={editVisitDate} onChange={e=>setEditVisitDate(e.target.value)} style={formInputStyle}/></label>
+                <label>الشركة<select value={editVisitCompanyId === null ? "" : String(editVisitCompanyId)} onChange={e=>{setEditVisitCompanyId(e.target.value ? Number(e.target.value) : null);setEditVisitCompanyName("")}} style={formInputStyle}><option value="">شخصي / بدون شركة</option>{companies.map(c=><option key={c.id} value={c.id}>{c.name}{!c.active ? " (معطلة)" : ""}</option>)}</select></label>
+                <label>اسم شركة أخرى<input value={editVisitCompanyName} onChange={e=>{setEditVisitCompanyName(e.target.value);setEditVisitCompanyId(null)}} placeholder="اتركه فارغًا للشخصي" style={formInputStyle}/></label>
+                <label>الشخص المطلوب<input value={editRequestedEmployee} onChange={e=>setEditRequestedEmployee(e.target.value)} style={formInputStyle}/></label>
+                <label>الغرض من الزيارة<input value={editVisitReason} onChange={e=>setEditVisitReason(e.target.value)} style={formInputStyle}/></label>
+              </div>
+              {editVisitError && <div style={{marginTop:"14px",padding:"10px 12px",borderRadius:"9px",background:"#fef2f2",color:"#b91c1c"}}>{editVisitError}</div>}
+              <div style={{display:"flex",gap:"10px",marginTop:"20px"}}>
+                <button type="button" className="view-all" onClick={closeEditVisit} disabled={savingVisitEdit}>إلغاء</button>
+                <button type="button" className="new-visit" onClick={() => void saveEditVisit()} disabled={savingVisitEdit}>{savingVisitEdit ? "جاري الحفظ..." : "حفظ التعديل"}</button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* =========================
             سجل الاتصالات
@@ -5546,6 +5710,14 @@ function App() {
                   }}
                 />
                 </label>
+
+                <input
+                  type="text"
+                  value={reportCompanySearch}
+                  onChange={(event) => setReportCompanySearch(event.target.value)}
+                  placeholder="ابحث باسم الشركة..."
+                  style={{height:"42px",border:"1px solid #d1d5db",borderRadius:"9px",padding:"0 12px",minWidth:"190px"}}
+                />
 
                 <select
                   value={
