@@ -63,6 +63,16 @@ type MailStatusChoice =
   | "preparing"
   | "other";
 
+type MailAttachment = {
+  id: number;
+  mailId: number;
+  fileName: string;
+  storagePath: string;
+  fileSize: number | null;
+  mimeType: string | null;
+  createdAt: string;
+};
+
 type MailItem = {
   id: number;
   mailNo: string;
@@ -73,6 +83,7 @@ type MailItem = {
   status: string;
   mailDate: string;
   mailTime: string;
+  attachments: MailAttachment[];
 };
 
 type CallStatus = "تحويل مكالمة" | "تم";
@@ -728,19 +739,6 @@ function App() {
     setSavingVisit,
   ] = useState(false);
 
-  const [showVisitEditForm, setShowVisitEditForm] = useState(false);
-  const [editingVisitId, setEditingVisitId] = useState<number | null>(null);
-  const [editVisitorName, setEditVisitorName] = useState("");
-  const [editVisitorPhone, setEditVisitorPhone] = useState("");
-  const [editVisitorEmail, setEditVisitorEmail] = useState("");
-  const [editVisitCompanyId, setEditVisitCompanyId] = useState<number | null>(null);
-  const [editVisitCompanyName, setEditVisitCompanyName] = useState("");
-  const [editRequestedEmployee, setEditRequestedEmployee] = useState("");
-  const [editVisitReason, setEditVisitReason] = useState("");
-  const [editVisitDate, setEditVisitDate] = useState("");
-  const [editVisitError, setEditVisitError] = useState("");
-  const [savingVisitEdit, setSavingVisitEdit] = useState(false);
-
   /* =========================
      نموذج الشركة
   ========================= */
@@ -801,8 +799,6 @@ function App() {
     reportCompany,
     setReportCompany,
   ] = useState("all");
-
-  const [reportCompanySearch, setReportCompanySearch] = useState("");
 
   const [
     reportStatus,
@@ -920,6 +916,9 @@ function App() {
 
   const [mailSearch, setMailSearch] =
     useState("");
+
+  const [mailSelectedFiles, setMailSelectedFiles] =
+    useState<File[]>([]);
 
   const [
     mailDirectionFilter,
@@ -1184,45 +1183,81 @@ function App() {
       return;
     }
 
-    const rows: MailItem[] = (
+    const baseRows = (
       result.data ?? []
-    ).map((row: any) => ({
-      id: row.id,
+    );
 
-      mailNo:
-        row.mail_no ||
-        `M-${String(
-          row.id,
-        ).padStart(6, "0")}`,
+    const mailIds = baseRows.map(
+      (row: any) => row.id,
+    );
 
-      subject:
-        row.subject || "",
+    let attachmentsByMail = new Map<
+      number,
+      MailAttachment[]
+    >();
 
-      direction:
-        row.direction ===
-        "outgoing"
-          ? "outgoing"
-          : "incoming",
+    if (mailIds.length > 0) {
+      const attachmentResult =
+        await supabase
+          .from("mail_attachments")
+          .select(
+            "id, mail_id, file_name, storage_path, file_size, mime_type, created_at",
+          )
+          .in("mail_id", mailIds)
+          .order("created_at", {
+            ascending: false,
+          });
 
-      responsible:
-        row.responsible || "",
+      if (!attachmentResult.error) {
+        attachmentsByMail =
+          new Map<
+            number,
+            MailAttachment[]
+          >();
 
-      action:
-        row.action || "",
+        for (const row of attachmentResult.data ?? []) {
+          const attachment: MailAttachment = {
+            id: row.id,
+            mailId: row.mail_id,
+            fileName: row.file_name || "",
+            storagePath: row.storage_path || "",
+            fileSize:
+              typeof row.file_size === "number"
+                ? row.file_size
+                : null,
+            mimeType: row.mime_type || null,
+            createdAt: row.created_at || "",
+          };
 
-      status:
-        row.status || "",
+          const current =
+            attachmentsByMail.get(attachment.mailId) || [];
+          current.push(attachment);
+          attachmentsByMail.set(attachment.mailId, current);
+        }
+      }
+    }
 
-      mailDate:
-        row.mail_date || "",
-
-      mailTime:
-        row.mail_time
-          ? String(
-              row.mail_time,
-            ).slice(0, 5)
+    const rows: MailItem[] =
+      baseRows.map((row: any) => ({
+        id: row.id,
+        mailNo:
+          row.mail_no ||
+          `M-${String(row.id).padStart(6, "0")}`,
+        subject: row.subject || "",
+        direction:
+          row.direction === "outgoing"
+            ? "outgoing"
+            : "incoming",
+        responsible: row.responsible || "",
+        action: row.action || "",
+        status: row.status || "",
+        mailDate: row.mail_date || "",
+        mailTime: row.mail_time
+          ? String(row.mail_time).slice(0, 5)
           : "",
-    }));
+        attachments:
+          attachmentsByMail.get(row.id) || [],
+      }));
 
     setMailItems(rows);
     setLoadingMail(false);
@@ -1666,38 +1701,6 @@ function App() {
     setSavingCompany(false);
   };
 
-  const toggleCompanyActive = async (company: Company) => {
-    const nextActive = !company.active;
-    const actionText = nextActive ? "إعادة تفعيل" : "تعطيل";
-
-    if (!window.confirm(`هل أنت متأكد من ${actionText} الشركة «${company.name}»؟`)) {
-      return;
-    }
-
-    const result = await supabase
-      .from("companies")
-      .update({ active: nextActive })
-      .eq("id", company.id)
-      .select("id, name, active")
-      .single();
-
-    if (result.error) {
-      setCompanyError(result.error.message);
-      return;
-    }
-
-    const updated = result.data as Company;
-    setCompanies((prev) =>
-      prev
-        .map((item) => item.id === updated.id ? updated : item)
-        .sort((a, b) => a.name.localeCompare(b.name, "ar")),
-    );
-
-    setSelectedCompanyPage((prev) =>
-      prev && prev.id === updated.id ? updated : prev,
-    );
-  };
-
   /* =========================
      حفظ زيارة
   ========================= */
@@ -1955,88 +1958,13 @@ function App() {
   const openVisitDetails = (
     visit: Visit,
   ) => {
-    setSelectedVisit(visit);
-    setCurrentPage("visitDetails");
-  };
+    setSelectedVisit(
+      visit,
+    );
 
-  const openEditVisit = (visit: Visit) => {
-    setEditingVisitId(visit.id);
-    setEditVisitorName(visit.visitorName);
-    setEditVisitorPhone(visit.visitorPhone);
-    setEditVisitorEmail(visit.visitorEmail);
-    setEditVisitCompanyId(visit.companyId);
-    setEditVisitCompanyName(visit.companyId ? "" : (visit.company === "شخصي" ? "" : visit.company));
-    setEditRequestedEmployee(visit.employee);
-    setEditVisitReason(visit.reason);
-    setEditVisitDate(visit.visitDate);
-    setEditVisitError("");
-    setShowVisitEditForm(true);
-  };
-
-  const closeEditVisit = () => {
-    if (savingVisitEdit) return;
-    setShowVisitEditForm(false);
-    setEditVisitError("");
-  };
-
-  const saveEditVisit = async () => {
-    if (!editingVisitId) return;
-    if (!editVisitorName.trim() || !editRequestedEmployee.trim() || !editVisitReason.trim() || !editVisitDate) {
-      setEditVisitError("أكمل اسم الزائر والشخص المطلوب والغرض وتاريخ الزيارة");
-      return;
-    }
-
-    setSavingVisitEdit(true);
-    setEditVisitError("");
-
-    const isPersonal = editVisitCompanyId === null && !editVisitCompanyName.trim();
-    const result = await supabase
-      .from("visits")
-      .update({
-        visitor_name: editVisitorName.trim(),
-        visitor_phone: editVisitorPhone.trim() || null,
-        visitor_email: editVisitorEmail.trim() || null,
-        company_id: editVisitCompanyId,
-        other_company_name: isPersonal ? "شخصي" : (editVisitCompanyId === null ? editVisitCompanyName.trim() : null),
-        requested_employee: editRequestedEmployee.trim(),
-        visit_reason: editVisitReason.trim(),
-        visit_date: editVisitDate,
-      })
-      .eq("id", editingVisitId)
-      .select("id, visit_no, visitor_name, visitor_phone, visitor_email, company_id, other_company_name, requested_employee, visit_reason, visit_date, check_in_at, check_out_at, status")
-      .single();
-
-    if (result.error) {
-      setEditVisitError(result.error.message);
-      setSavingVisitEdit(false);
-      return;
-    }
-
-    const row: any = result.data;
-    const companyName = row.company_id !== null
-      ? companies.find((company) => company.id === row.company_id)?.name || ""
-      : row.other_company_name || "شخصي";
-
-    const updatedVisit: Visit = {
-      id: row.id,
-      visitNo: row.visit_no || `V-${String(row.id).padStart(6, "0")}`,
-      visitorName: row.visitor_name || "",
-      visitorPhone: row.visitor_phone || "",
-      visitorEmail: row.visitor_email || "",
-      company: companyName,
-      companyId: row.company_id ?? null,
-      employee: row.requested_employee || "",
-      reason: row.visit_reason || "",
-      visitDate: row.visit_date || "",
-      checkIn: row.check_in_at || null,
-      checkOut: row.check_out_at || null,
-      status: row.status || "waiting",
-    };
-
-    setVisits((prev) => prev.map((item) => item.id === updatedVisit.id ? updatedVisit : item));
-    setSelectedVisit(updatedVisit);
-    setShowVisitEditForm(false);
-    setSavingVisitEdit(false);
+    setCurrentPage(
+      "visitDetails",
+    );
   };
 
   /* =========================
@@ -2265,6 +2193,7 @@ function App() {
 
   const resetMailForm = () => {
     setMailEditingId(null);
+    setMailSelectedFiles([]);
 
     setMailSubject("");
 
@@ -2361,6 +2290,7 @@ function App() {
       mail.mailTime,
     );
 
+    setMailSelectedFiles([]);
     setMailFormError("");
     setShowMailForm(true);
   };
@@ -2372,6 +2302,206 @@ function App() {
 
     setShowMailForm(false);
     resetMailForm();
+  };
+
+  const deleteMail = async (mail: MailItem) => {
+    if (savingMail) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `هل أنت متأكد من حذف البريد ${mail.mailNo}؟\nسيتم حذف المرفقات المرتبطة به أيضًا.`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setMailError("");
+
+    const attachmentResult = await supabase
+      .from("mail_attachments")
+      .select("storage_path")
+      .eq("mail_id", mail.id);
+
+    if (attachmentResult.error) {
+      setMailError(
+        `تعذر تجهيز مرفقات البريد للحذف: ${attachmentResult.error.message}`,
+      );
+      return;
+    }
+
+    const storagePaths = (attachmentResult.data ?? [])
+      .map((row: any) => row.storage_path)
+      .filter(
+        (path: unknown): path is string =>
+          typeof path === "string" && path.trim().length > 0,
+      );
+
+    if (storagePaths.length > 0) {
+      const storageDelete = await supabase.storage
+        .from("mail-attachments")
+        .remove(storagePaths);
+
+      if (storageDelete.error) {
+        setMailError(
+          `تعذر حذف مرفقات البريد: ${storageDelete.error.message}`,
+        );
+        return;
+      }
+    }
+
+    const deleteResult = await supabase
+      .from("mail")
+      .delete()
+      .eq("id", mail.id);
+
+    if (deleteResult.error) {
+      setMailError(
+        `تعذر حذف البريد: ${deleteResult.error.message}`,
+      );
+      return;
+    }
+
+    setMailItems((prev) =>
+      prev.filter((item) => item.id !== mail.id),
+    );
+  };
+
+  const deleteMailAttachment = async (
+    attachment: MailAttachment,
+  ) => {
+    if (savingMail) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `هل أنت متأكد من حذف المرفق "${attachment.fileName}"؟`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setMailFormError("");
+
+    if (attachment.storagePath) {
+      const storageDelete = await supabase.storage
+        .from("mail-attachments")
+        .remove([attachment.storagePath]);
+
+      if (storageDelete.error) {
+        setMailFormError(
+          `تعذر حذف المرفق من التخزين: ${storageDelete.error.message}`,
+        );
+        return;
+      }
+    }
+
+    const deleteResult = await supabase
+      .from("mail_attachments")
+      .delete()
+      .eq("id", attachment.id);
+
+    if (deleteResult.error) {
+      setMailFormError(
+        `تم حذف الملف من التخزين لكن تعذر حذف سجله: ${deleteResult.error.message}`,
+      );
+      return;
+    }
+
+    setMailItems((current) =>
+      current.map((mail) =>
+        mail.id === attachment.mailId
+          ? {
+              ...mail,
+              attachments: mail.attachments.filter(
+                (item) => item.id !== attachment.id,
+              ),
+            }
+          : mail,
+      ),
+    );
+  };
+
+  const openMailAttachment = async (
+    attachment: MailAttachment,
+  ) => {
+    if (!attachment.storagePath) {
+      return;
+    }
+
+    const result =
+      await supabase.storage
+        .from("mail-attachments")
+        .createSignedUrl(
+          attachment.storagePath,
+          600,
+        );
+
+    if (result.error || !result.data?.signedUrl) {
+      setMailFormError(
+        result.error?.message ||
+          "تعذر فتح المرفق",
+      );
+      return;
+    }
+
+    window.open(
+      result.data.signedUrl,
+      "_blank",
+      "noopener,noreferrer",
+    );
+  };
+
+  const uploadMailAttachments = async (
+    mailId: number,
+  ): Promise<string | null> => {
+    if (mailSelectedFiles.length === 0) {
+      return null;
+    }
+
+    for (const file of mailSelectedFiles) {
+      const safeName = file.name
+        .replace(/[\\/:*?"<>|]+/g, "_")
+        .trim() || "file";
+
+      const storagePath =
+        `${mailId}/${Date.now()}-${Math.random().toString(36).slice(2, 9)}-${safeName}`;
+
+      const uploadResult =
+        await supabase.storage
+          .from("mail-attachments")
+          .upload(
+            storagePath,
+            file,
+            {
+              upsert: false,
+              contentType: file.type || undefined,
+            },
+          );
+
+      if (uploadResult.error) {
+        return uploadResult.error.message;
+      }
+
+      const insertResult =
+        await supabase
+          .from("mail_attachments")
+          .insert({
+            mail_id: mailId,
+            file_name: file.name,
+            storage_path: storagePath,
+            file_size: file.size,
+            mime_type: file.type || null,
+          });
+
+      if (insertResult.error) {
+        return insertResult.error.message;
+      }
+    }
+
+    return null;
   };
 
   const saveMail = async () => {
@@ -2486,6 +2616,20 @@ function App() {
         return;
       }
 
+      const attachmentError =
+        await uploadMailAttachments(
+          mailEditingId,
+        );
+
+      if (attachmentError) {
+        setMailFormError(
+          `تم حفظ البريد، لكن تعذر رفع المرفق: ${attachmentError}`,
+        );
+        await loadMail();
+        setSavingMail(false);
+        return;
+      }
+
       setMailItems((prev) =>
         prev.map((item) =>
           item.id ===
@@ -2509,6 +2653,7 @@ function App() {
         ),
       );
 
+      await loadMail();
       setSavingMail(false);
       setShowMailForm(false);
       resetMailForm();
@@ -2578,6 +2723,18 @@ function App() {
       return;
     }
 
+    const attachmentError =
+      await uploadMailAttachments(id);
+
+    if (attachmentError) {
+      setMailFormError(
+        `تم حفظ البريد، لكن تعذر رفع المرفق: ${attachmentError}`,
+      );
+      await loadMail();
+      setSavingMail(false);
+      return;
+    }
+
     const newMail: MailItem = {
       id,
       mailNo,
@@ -2593,6 +2750,7 @@ function App() {
         finalStatus,
       mailDate,
       mailTime,
+      attachments: [],
     };
 
     setMailItems(
@@ -2602,6 +2760,7 @@ function App() {
       ],
     );
 
+    await loadMail();
     setSavingMail(false);
     setShowMailForm(false);
 
@@ -3048,11 +3207,13 @@ function App() {
             visit.visitDate <=
               reportTo;
 
-          const companySearch = reportCompanySearch.trim().toLowerCase();
           const matchCompany =
-            reportCompany === "all" || String(visit.companyId) === reportCompany;
-          const matchCompanySearch =
-            !companySearch || visit.company.toLowerCase().includes(companySearch);
+            reportCompany ===
+              "all" ||
+            String(
+              visit.companyId,
+            ) ===
+              reportCompany;
 
           const matchStatus =
             reportStatus ===
@@ -3064,7 +3225,6 @@ function App() {
             matchFrom &&
             matchTo &&
             matchCompany &&
-            matchCompanySearch &&
             matchStatus
           );
         },
@@ -3074,7 +3234,6 @@ function App() {
       reportFrom,
       reportTo,
       reportCompany,
-      reportCompanySearch,
       reportStatus,
     ]);
 
@@ -3243,7 +3402,10 @@ function App() {
     visits.filter(
       (visit) =>
         visit.status ===
-        "exited",
+          "exited" &&
+        !!visit.checkOut &&
+        getVisitDateKey(visit.checkOut) ===
+          getJordanDate(),
     ).length;
 
   const todayVisits =
@@ -4742,15 +4904,6 @@ function App() {
                                   >
                                     تعديل
                                   </button>
-
-                                  <button
-                                    type="button"
-                                    className="action-button"
-                                    style={{ marginRight: "6px" }}
-                                    onClick={() => void toggleCompanyActive(company)}
-                                  >
-                                    {company.active ? "تعطيل" : "تفعيل"}
-                                  </button>
                                 </td>
                               </tr>
                             );
@@ -5240,13 +5393,6 @@ function App() {
                 <div className="top-actions">
                   <button
                     type="button"
-                    className="new-visit"
-                    onClick={() => openEditVisit(selectedVisit)}
-                  >
-                    تعديل الزيارة
-                  </button>
-                  <button
-                    type="button"
                     className="view-all"
                     onClick={
                       backToVisits
@@ -5418,32 +5564,6 @@ function App() {
               </section>
             </>
           )}
-
-        {showVisitEditForm && selectedVisit && (
-          <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.35)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,padding:"20px"}}>
-            <div style={{background:"#fff",borderRadius:"16px",width:"min(760px, 100%)",maxHeight:"90vh",overflowY:"auto",padding:"24px",boxShadow:"0 20px 50px rgba(0,0,0,.18)"}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"20px"}}>
-                <div><h2 style={{margin:0}}>تعديل الزيارة</h2><p style={{margin:"6px 0 0",color:"#6b7280"}}>{selectedVisit.visitNo}</p></div>
-                <button type="button" className="view-all" onClick={closeEditVisit}>إغلاق</button>
-              </div>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:"14px"}}>
-                <label>اسم الزائر<input value={editVisitorName} onChange={e=>setEditVisitorName(e.target.value)} style={formInputStyle}/></label>
-                <label>رقم الهاتف<input value={editVisitorPhone} onChange={e=>setEditVisitorPhone(e.target.value)} style={formInputStyle}/></label>
-                <label>البريد الإلكتروني<input type="email" value={editVisitorEmail} onChange={e=>setEditVisitorEmail(e.target.value)} style={formInputStyle}/></label>
-                <label>تاريخ الزيارة<input type="date" value={editVisitDate} onChange={e=>setEditVisitDate(e.target.value)} style={formInputStyle}/></label>
-                <label>الشركة<select value={editVisitCompanyId === null ? "" : String(editVisitCompanyId)} onChange={e=>{setEditVisitCompanyId(e.target.value ? Number(e.target.value) : null);setEditVisitCompanyName("")}} style={formInputStyle}><option value="">شخصي / بدون شركة</option>{companies.map(c=><option key={c.id} value={c.id}>{c.name}{!c.active ? " (معطلة)" : ""}</option>)}</select></label>
-                <label>اسم شركة أخرى<input value={editVisitCompanyName} onChange={e=>{setEditVisitCompanyName(e.target.value);setEditVisitCompanyId(null)}} placeholder="اتركه فارغًا للشخصي" style={formInputStyle}/></label>
-                <label>الشخص المطلوب<input value={editRequestedEmployee} onChange={e=>setEditRequestedEmployee(e.target.value)} style={formInputStyle}/></label>
-                <label>الغرض من الزيارة<input value={editVisitReason} onChange={e=>setEditVisitReason(e.target.value)} style={formInputStyle}/></label>
-              </div>
-              {editVisitError && <div style={{marginTop:"14px",padding:"10px 12px",borderRadius:"9px",background:"#fef2f2",color:"#b91c1c"}}>{editVisitError}</div>}
-              <div style={{display:"flex",gap:"10px",marginTop:"20px"}}>
-                <button type="button" className="view-all" onClick={closeEditVisit} disabled={savingVisitEdit}>إلغاء</button>
-                <button type="button" className="new-visit" onClick={() => void saveEditVisit()} disabled={savingVisitEdit}>{savingVisitEdit ? "جاري الحفظ..." : "حفظ التعديل"}</button>
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* =========================
             سجل الاتصالات
@@ -5710,14 +5830,6 @@ function App() {
                   }}
                 />
                 </label>
-
-                <input
-                  type="text"
-                  value={reportCompanySearch}
-                  onChange={(event) => setReportCompanySearch(event.target.value)}
-                  placeholder="ابحث باسم الشركة..."
-                  style={{height:"42px",border:"1px solid #d1d5db",borderRadius:"9px",padding:"0 12px",minWidth:"190px"}}
-                />
 
                 <select
                   value={
@@ -6173,6 +6285,10 @@ function App() {
                           </th>
 
                           <th>
+                            المرفقات
+                          </th>
+
+                          <th>
                             الإجراء
                           </th>
                         </tr>
@@ -6239,17 +6355,74 @@ function App() {
                               </td>
 
                               <td>
-                                <button
-                                  type="button"
-                                  className="action-button details"
-                                  onClick={() =>
-                                    openEditMail(
-                                      mail,
-                                    )
-                                  }
+                                {mail.attachments.length > 0 ? (
+                                  <div
+                                    style={{
+                                      display: "flex",
+                                      flexDirection: "column",
+                                      gap: "6px",
+                                    }}
+                                  >
+                                    <span
+                                      style={{
+                                        fontSize: "12px",
+                                        fontWeight: 700,
+                                        color: "#475569",
+                                      }}
+                                    >
+                                      {mail.attachments.length} ملف
+                                    </span>
+                                    {mail.attachments.slice(0, 2).map((attachment) => (
+                                      <button
+                                        key={attachment.id}
+                                        type="button"
+                                        className="action-button details"
+                                        onClick={() => void openMailAttachment(attachment)}
+                                        style={{ whiteSpace: "nowrap" }}
+                                      >
+                                        فتح المرفق
+                                      </button>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  "—"
+                                )}
+                              </td>
+
+                              <td>
+                                <div
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    gap: "7px",
+                                    flexWrap: "wrap",
+                                  }}
                                 >
-                                  تفاصيل
-                                </button>
+                                  <button
+                                    type="button"
+                                    className="action-button details"
+                                    onClick={() =>
+                                      openEditMail(
+                                        mail,
+                                      )
+                                    }
+                                  >
+                                    تفاصيل
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    className="action-button"
+                                    onClick={() => void deleteMail(mail)}
+                                    style={{
+                                      background: "#dc2626",
+                                      color: "#fff",
+                                    }}
+                                  >
+                                    حذف
+                                  </button>
+                                </div>
                               </td>
                             </tr>
                           ),
@@ -6259,7 +6432,7 @@ function App() {
                           0 && (
                           <tr>
                             <td
-                              colSpan={9}
+                              colSpan={10}
                             >
                               لا توجد رسائل مطابقة
                             </td>
@@ -7603,6 +7776,199 @@ function App() {
                   }
                 />
               </div>
+            </div>
+
+            <div
+              style={{
+                marginTop: "20px",
+                padding: "16px",
+                border: "1px dashed #cbd5e1",
+                borderRadius: "12px",
+                background: "#f8fafc",
+              }}
+            >
+              <label
+                style={{
+                  display: "block",
+                  marginBottom: "8px",
+                  fontSize: "13px",
+                  fontWeight: 800,
+                  color: "#374151",
+                }}
+              >
+                المرفقات
+              </label>
+
+              <input
+                type="file"
+                multiple
+                onChange={(event) =>
+                  setMailSelectedFiles(
+                    Array.from(event.target.files ?? []),
+                  )
+                }
+                style={{
+                  width: "100%",
+                  padding: "10px",
+                  border: "1px solid #d1d5db",
+                  borderRadius: "9px",
+                  background: "#fff",
+                }}
+                disabled={savingMail}
+              />
+
+              <div
+                style={{
+                  marginTop: "8px",
+                  fontSize: "12px",
+                  color: "#64748b",
+                }}
+              >
+                يمكنك إرفاق أكثر من ملف مع البريد.
+              </div>
+
+              {mailSelectedFiles.length > 0 && (
+                <div
+                  style={{
+                    marginTop: "12px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "6px",
+                  }}
+                >
+                  {mailSelectedFiles.map((file, index) => (
+                    <div
+                      key={`${file.name}-${file.size}-${index}`}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: "12px",
+                        padding: "9px 11px",
+                        background: "#fff",
+                        borderRadius: "8px",
+                        border: "1px solid #e2e8f0",
+                        fontSize: "12px",
+                      }}
+                    >
+                      <span
+                        style={{
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {file.name}
+                      </span>
+                      <span
+                        style={{
+                          color: "#64748b",
+                          flexShrink: 0,
+                        }}
+                      >
+                        {(file.size / 1024).toFixed(0)} KB
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {mailEditingId !== null && (
+                <div
+                  style={{
+                    marginTop: "14px",
+                    paddingTop: "12px",
+                    borderTop: "1px solid #e2e8f0",
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: "12px",
+                      fontWeight: 800,
+                      color: "#475569",
+                      marginBottom: "8px",
+                    }}
+                  >
+                    المرفقات المحفوظة
+                  </div>
+
+                  {(mailItems.find((item) => item.id === mailEditingId)?.attachments ?? []).length > 0 ? (
+                    <div
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "7px",
+                      }}
+                    >
+                      {(mailItems.find((item) => item.id === mailEditingId)?.attachments ?? []).map((attachment) => (
+                        <div
+                          key={attachment.id}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            gap: "12px",
+                            padding: "9px 11px",
+                            background: "#fff",
+                            borderRadius: "8px",
+                            border: "1px solid #e2e8f0",
+                          }}
+                        >
+                          <span
+                            style={{
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                              fontSize: "12px",
+                            }}
+                          >
+                            {attachment.fileName}
+                          </span>
+
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "7px",
+                              flexShrink: 0,
+                            }}
+                          >
+                            <button
+                              type="button"
+                              className="action-button details"
+                              onClick={() => void openMailAttachment(attachment)}
+                            >
+                              فتح
+                            </button>
+
+                            <button
+                              type="button"
+                              className="action-button"
+                              onClick={() => void deleteMailAttachment(attachment)}
+                              disabled={savingMail}
+                              style={{
+                                background: "#dc2626",
+                                color: "#fff",
+                              }}
+                            >
+                              حذف
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div
+                      style={{
+                        fontSize: "12px",
+                        color: "#94a3b8",
+                      }}
+                    >
+                      لا توجد مرفقات محفوظة.
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {mailFormError && (
