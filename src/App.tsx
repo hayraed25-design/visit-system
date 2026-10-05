@@ -38,7 +38,6 @@ type Visit = {
 type Company = {
   id: number;
   name: string;
-  email: string;
   active: boolean;
 };
 
@@ -783,8 +782,6 @@ function App() {
     setCompanyFormName,
   ] = useState("");
 
-  const [companyFormEmail, setCompanyFormEmail] = useState("");
-
   const [
     companyFormActive,
     setCompanyFormActive,
@@ -1027,29 +1024,15 @@ function App() {
       setLoadingCompanies(true);
       setCompanyError("");
 
-      let result =
+      const result =
         await supabase
           .from("companies")
           .select(
-            "id, name, email, active",
+            "id, name, active",
           )
           .order("name", {
             ascending: true,
           });
-
-      if (result.error) {
-        const fallback = await supabase
-          .from("companies")
-          .select("id, name, active")
-          .order("name", { ascending: true });
-
-        if (!fallback.error) {
-          result = ({
-            ...fallback,
-            data: (fallback.data ?? []).map((row: any) => ({ ...row, email: "" })),
-          } as unknown) as typeof result;
-        }
-      }
 
       if (result.error) {
         setCompanyError(result.error.message);
@@ -1061,7 +1044,6 @@ function App() {
         (result.data ?? []).map((row: any) => ({
           id: row.id,
           name: row.name || "",
-          email: row.email || "",
           active: row.active !== false,
         })),
       );
@@ -1568,7 +1550,6 @@ function App() {
     setCompanyFormMode("add");
     setCompanyFormId(null);
     setCompanyFormName("");
-    setCompanyFormEmail("");
     setCompanyFormActive(true);
     setCompanyFormError("");
     setCompanyFormFromVisit(
@@ -1585,7 +1566,6 @@ function App() {
     setCompanyFormName(
       company.name,
     );
-    setCompanyFormEmail(company.email || "");
     setCompanyFormActive(
       company.active,
     );
@@ -1623,12 +1603,11 @@ function App() {
           .from("companies")
           .insert({
             name,
-            email: companyFormEmail.trim() || null,
             active:
               companyFormActive,
           })
           .select(
-            "id, name, email, active",
+            "id, name, active",
           )
           .single();
 
@@ -1643,7 +1622,6 @@ function App() {
       const company: Company = {
         id: result.data.id,
         name: result.data.name || "",
-        email: result.data.email || "",
         active: result.data.active !== false,
       };
 
@@ -1684,7 +1662,6 @@ function App() {
           .from("companies")
           .update({
             name,
-            email: companyFormEmail.trim() || null,
             active:
               companyFormActive,
           })
@@ -1693,7 +1670,7 @@ function App() {
             companyFormId,
           )
           .select(
-            "id, name, email, active",
+            "id, name, active",
           )
           .single();
 
@@ -1708,7 +1685,6 @@ function App() {
       const updated: Company = {
         id: result.data.id,
         name: result.data.name || "",
-        email: result.data.email || "",
         active: result.data.active !== false,
       };
 
@@ -8293,11 +8269,6 @@ function App() {
                   savingCompany
                 }
               />
-            </div>
-
-            <div style={{ marginTop: "18px" }}>
-              <label style={{display:"block",marginBottom:"8px",fontSize:"13px",fontWeight:700,color:"#374151"}}>البريد الإلكتروني للشركة</label>
-              <input type="email" value={companyFormEmail} onChange={(event) => setCompanyFormEmail(event.target.value)} placeholder="example@company.com" style={formInputStyle} disabled={savingCompany} />
             </div>
 
             <label
