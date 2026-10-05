@@ -1044,10 +1044,10 @@ function App() {
           .order("name", { ascending: true });
 
         if (!fallback.error) {
-          result = {
+          result = ({
             ...fallback,
             data: (fallback.data ?? []).map((row: any) => ({ ...row, email: "" })),
-          } as typeof result;
+          } as unknown) as typeof result;
         }
       }
 
