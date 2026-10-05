@@ -1,4 +1,4 @@
-
+-- مرفقات البريد: جدول مستقل + Storage bucket
 
 create table if not exists mail_attachments (
   id bigint generated always as identity primary key,

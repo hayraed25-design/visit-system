@@ -139,3 +139,10 @@ alter table appointments add constraint appointments_status_check
 check (status in ('قيد الانتظار', 'تم الموعد', 'تأجيل الموعد', 'إلغاء الموعد'));
 
 alter table appointments alter column status set default 'قيد الانتظار';
+
+/* =========================
+   البريد الإلكتروني للشركات
+========================= */
+
+alter table companies
+add column if not exists email text;

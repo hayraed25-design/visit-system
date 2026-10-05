@@ -20,6 +20,7 @@ type VisitStatus =
 
 type Visit = {
   id: number;
+  visitorId: number | null;
   visitNo: string;
   visitorName: string;
   visitorPhone: string;
@@ -37,6 +38,7 @@ type Visit = {
 type Company = {
   id: number;
   name: string;
+  email: string;
   active: boolean;
 };
 
@@ -739,6 +741,17 @@ function App() {
     setSavingVisit,
   ] = useState(false);
 
+  const [editingVisit, setEditingVisit] = useState(false);
+  const [savingVisitEdit, setSavingVisitEdit] = useState(false);
+  const [visitEditError, setVisitEditError] = useState("");
+  const [editVisitName, setEditVisitName] = useState("");
+  const [editVisitPhone, setEditVisitPhone] = useState("");
+  const [editVisitEmail, setEditVisitEmail] = useState("");
+  const [editVisitCompanyId, setEditVisitCompanyId] = useState<number | null>(null);
+  const [editVisitDate, setEditVisitDate] = useState("");
+  const [editVisitEmployee, setEditVisitEmployee] = useState("");
+  const [editVisitReason, setEditVisitReason] = useState("");
+
   /* =========================
      نموذج الشركة
   ========================= */
@@ -769,6 +782,8 @@ function App() {
     companyFormName,
     setCompanyFormName,
   ] = useState("");
+
+  const [companyFormEmail, setCompanyFormEmail] = useState("");
 
   const [
     companyFormActive,
@@ -806,6 +821,10 @@ function App() {
   ] = useState<"all" | VisitStatus>(
     "all",
   );
+
+  const [reportVisitSearch, setReportVisitSearch] = useState("");
+  const [companyReportSearch, setCompanyReportSearch] = useState("");
+  const [companyReportEmailFilter, setCompanyReportEmailFilter] = useState<"all" | "withEmail" | "withoutEmail">("all");
 
   // فلاتر التاريخ لتقارير البريد والاتصالات
   const [reportMailFrom, setReportMailFrom] = useState("");
@@ -979,7 +998,7 @@ function App() {
   const [appointmentDateFrom, setAppointmentDateFrom] = useState("");
   const [appointmentDateTo, setAppointmentDateTo] = useState("");
 
-  const [reportSection, setReportSection] = useState<"visits" | "mail" | "calls" | "appointments">("visits");
+  const [reportSection, setReportSection] = useState<"visits" | "mail" | "calls" | "appointments" | "companies">("visits");
 
   /* =========================
      تنسيق الإدخال
@@ -1008,33 +1027,43 @@ function App() {
       setLoadingCompanies(true);
       setCompanyError("");
 
-      const result =
+      let result =
         await supabase
           .from("companies")
           .select(
-            "id, name, active",
+            "id, name, email, active",
           )
           .order("name", {
             ascending: true,
           });
 
       if (result.error) {
-        setCompanyError(
-          result.error.message,
-        );
+        const fallback = await supabase
+          .from("companies")
+          .select("id, name, active")
+          .order("name", { ascending: true });
+
+        if (!fallback.error) {
+          result = {
+            ...fallback,
+            data: (fallback.data ?? []).map((row: any) => ({ ...row, email: "" })),
+          } as typeof result;
+        }
+      }
+
+      if (result.error) {
+        setCompanyError(result.error.message);
         setLoadingCompanies(false);
         return;
       }
 
       setCompanies(
-        (result.data ?? []).map(
-          (row: any) => ({
-            id: row.id,
-            name: row.name,
-            active:
-              row.active !== false,
-          }),
-        ),
+        (result.data ?? []).map((row: any) => ({
+          id: row.id,
+          name: row.name || "",
+          email: row.email || "",
+          active: row.active !== false,
+        })),
       );
 
       setLoadingCompanies(false);
@@ -1065,6 +1094,7 @@ function App() {
       .select(
         `
           id,
+          visitor_id,
           visit_no,
           visitor_name,
           visitor_phone,
@@ -1095,6 +1125,8 @@ function App() {
       result.data ?? []
     ).map((row: any) => ({
       id: row.id,
+
+      visitorId: row.visitor_id ?? null,
 
       visitNo:
         row.visit_no ||
@@ -1536,6 +1568,7 @@ function App() {
     setCompanyFormMode("add");
     setCompanyFormId(null);
     setCompanyFormName("");
+    setCompanyFormEmail("");
     setCompanyFormActive(true);
     setCompanyFormError("");
     setCompanyFormFromVisit(
@@ -1552,6 +1585,7 @@ function App() {
     setCompanyFormName(
       company.name,
     );
+    setCompanyFormEmail(company.email || "");
     setCompanyFormActive(
       company.active,
     );
@@ -1589,11 +1623,12 @@ function App() {
           .from("companies")
           .insert({
             name,
+            email: companyFormEmail.trim() || null,
             active:
               companyFormActive,
           })
           .select(
-            "id, name, active",
+            "id, name, email, active",
           )
           .single();
 
@@ -1605,8 +1640,12 @@ function App() {
         return;
       }
 
-      const company =
-        result.data as Company;
+      const company: Company = {
+        id: result.data.id,
+        name: result.data.name || "",
+        email: result.data.email || "",
+        active: result.data.active !== false,
+      };
 
       setCompanies((prev) =>
         [
@@ -1645,6 +1684,7 @@ function App() {
           .from("companies")
           .update({
             name,
+            email: companyFormEmail.trim() || null,
             active:
               companyFormActive,
           })
@@ -1653,7 +1693,7 @@ function App() {
             companyFormId,
           )
           .select(
-            "id, name, active",
+            "id, name, email, active",
           )
           .single();
 
@@ -1665,8 +1705,12 @@ function App() {
         return;
       }
 
-      const updated =
-        result.data as Company;
+      const updated: Company = {
+        id: result.data.id,
+        name: result.data.name || "",
+        email: result.data.email || "",
+        active: result.data.active !== false,
+      };
 
       setCompanies((prev) =>
         prev
@@ -1967,6 +2011,91 @@ function App() {
     );
   };
 
+  const openEditVisit = (visit: Visit) => {
+    setSelectedVisit(visit);
+    setEditVisitName(visit.visitorName);
+    setEditVisitPhone(visit.visitorPhone);
+    setEditVisitEmail(visit.visitorEmail);
+    setEditVisitCompanyId(visit.companyId);
+    setEditVisitDate(visit.visitDate);
+    setEditVisitEmployee(visit.employee);
+    setEditVisitReason(visit.reason);
+    setVisitEditError("");
+    setEditingVisit(true);
+    setCurrentPage("visitDetails");
+  };
+
+  const cancelEditVisit = () => {
+    if (savingVisitEdit) return;
+    setEditingVisit(false);
+    setVisitEditError("");
+  };
+
+  const saveVisitEdit = async () => {
+    if (!selectedVisit) return;
+    if (!editVisitName.trim()) { setVisitEditError("أدخل اسم الزائر"); return; }
+    if (!editVisitEmployee.trim()) { setVisitEditError("أدخل الشخص المطلوب"); return; }
+    if (!editVisitReason.trim()) { setVisitEditError("أدخل الغرض من الزيارة"); return; }
+    if (!editVisitDate) { setVisitEditError("اختر تاريخ الزيارة"); return; }
+
+    setSavingVisitEdit(true);
+    setVisitEditError("");
+    const visitResult = await supabase
+      .from("visits")
+      .update({
+        visitor_name: editVisitName.trim(),
+        visitor_phone: editVisitPhone.trim() || null,
+        visitor_email: editVisitEmail.trim() || null,
+        company_id: editVisitCompanyId,
+        other_company_name: editVisitCompanyId === null ? "شخصي" : null,
+        requested_employee: editVisitEmployee.trim(),
+        visit_reason: editVisitReason.trim(),
+        visit_date: editVisitDate,
+      })
+      .eq("id", selectedVisit.id);
+
+    if (visitResult.error) {
+      setVisitEditError(visitResult.error.message);
+      setSavingVisitEdit(false);
+      return;
+    }
+
+    if (selectedVisit.visitorId) {
+      const visitorResult = await supabase
+        .from("visitors")
+        .update({
+          name: editVisitName.trim(),
+          phone: editVisitPhone.trim() || null,
+          email: editVisitEmail.trim() || null,
+        })
+        .eq("id", selectedVisit.visitorId);
+      if (visitorResult.error) {
+        setVisitEditError(visitorResult.error.message);
+        setSavingVisitEdit(false);
+        return;
+      }
+    }
+
+    const updated: Visit = {
+      ...selectedVisit,
+      visitorName: editVisitName.trim(),
+      visitorPhone: editVisitPhone.trim(),
+      visitorEmail: editVisitEmail.trim(),
+      company: editVisitCompanyId === null
+        ? "شخصي"
+        : companies.find((company) => company.id === editVisitCompanyId)?.name || selectedVisit.company,
+      companyId: editVisitCompanyId,
+      employee: editVisitEmployee.trim(),
+      reason: editVisitReason.trim(),
+      visitDate: editVisitDate,
+    };
+    setSelectedVisit(updated);
+    setVisits((prev) => prev.map((item) => item.id === updated.id ? updated : item));
+    setCompanyPageVisits((prev) => prev.map((item) => item.id === updated.id ? updated : item));
+    setEditingVisit(false);
+    setSavingVisitEdit(false);
+  };
+
   /* =========================
      تفاصيل الشركة
   ========================= */
@@ -1993,6 +2122,7 @@ function App() {
           .select(
             `
               id,
+              visitor_id,
               visit_no,
               visitor_name,
               visitor_phone,
@@ -2054,6 +2184,8 @@ function App() {
           []
         ).map((row: any) => ({
           id: row.id,
+
+          visitorId: row.visitor_id ?? null,
 
           visitNo:
             row.visit_no ||
@@ -2181,10 +2313,9 @@ function App() {
 
   const backToVisits = () => {
     setSelectedVisit(null);
-
-    setCurrentPage(
-      "visits",
-    );
+    setEditingVisit(false);
+    setVisitEditError("");
+    setCurrentPage("visits");
   };
 
   /* =========================
@@ -3195,8 +3326,19 @@ function App() {
 
   const filteredReportVisits =
     useMemo(() => {
+      const search = reportVisitSearch.trim().toLowerCase();
       return visits.filter(
         (visit) => {
+          const matchSearch = !search || [
+            visit.visitNo,
+            visit.visitorName,
+            visit.visitorPhone,
+            visit.visitorEmail,
+            visit.company,
+            visit.employee,
+            visit.reason,
+          ].some((value) => value.toLowerCase().includes(search));
+
           const matchFrom =
             !reportFrom ||
             visit.visitDate >=
@@ -3222,6 +3364,7 @@ function App() {
               reportStatus;
 
           return (
+            matchSearch &&
             matchFrom &&
             matchTo &&
             matchCompany &&
@@ -3235,7 +3378,50 @@ function App() {
       reportTo,
       reportCompany,
       reportStatus,
+      reportVisitSearch,
     ]);
+
+  const companyReportRows = useMemo(() => {
+    const emailsByCompany = new Map<number, Set<string>>();
+
+    for (const visit of visits) {
+      if (visit.companyId === null) continue;
+
+      const email = visit.visitorEmail.trim();
+      if (!email) continue;
+
+      if (!emailsByCompany.has(visit.companyId)) {
+        emailsByCompany.set(visit.companyId, new Set<string>());
+      }
+
+      emailsByCompany.get(visit.companyId)!.add(email);
+    }
+
+    return companies.map((company) => ({
+      id: company.id,
+      name: company.name,
+      email: Array.from(emailsByCompany.get(company.id) ?? []).join("، "),
+    }));
+  }, [companies, visits]);
+
+  const filteredCompanyReport = useMemo(() => {
+    const search = companyReportSearch.trim().toLowerCase();
+
+    return companyReportRows.filter((company) => {
+      const hasEmail = company.email.trim().length > 0;
+      const matchSearch =
+        !search ||
+        company.name.toLowerCase().includes(search) ||
+        company.email.toLowerCase().includes(search);
+
+      const matchEmailFilter =
+        companyReportEmailFilter === "all" ||
+        (companyReportEmailFilter === "withEmail" && hasEmail) ||
+        (companyReportEmailFilter === "withoutEmail" && !hasEmail);
+
+      return matchSearch && matchEmailFilter;
+    });
+  }, [companyReportRows, companyReportSearch, companyReportEmailFilter]);
 
   const filteredMail =
     useMemo(() => {
@@ -3447,6 +3633,17 @@ function App() {
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "الاتصالات");
     XLSX.writeFile(workbook, `تقرير الاتصالات ${getJordanDate()}.xlsx`);
+  };
+
+  const exportCompaniesToExcel = () => {
+    const data = filteredCompanyReport.map((company) => ({
+      "اسم الشركة": company.name,
+      "البريد الإلكتروني": company.email || "",
+    }));
+    const worksheet = XLSX.utils.json_to_sheet(data);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "الشركات");
+    XLSX.writeFile(workbook, `تقرير الشركات ${getJordanDate()}.xlsx`);
   };
 
   const exportAppointmentsToExcel = () => {
@@ -4560,6 +4757,10 @@ function App() {
                           </th>
 
                           <th>
+                            البريد الإلكتروني
+                          </th>
+
+                          <th>
                             الشركة
                           </th>
 
@@ -4610,6 +4811,10 @@ function App() {
                                 </td>
 
                                 <td>
+                                  {visit.visitorEmail || "—"}
+                                </td>
+
+                                <td>
                                   {
                                     visit.company
                                   }
@@ -4653,6 +4858,8 @@ function App() {
                                   >
                                     التفاصيل
                                   </button>
+
+                                  <button type="button" className="action-button check-in" style={{marginRight:"6px"}} onClick={() => openEditVisit(visit)}>تعديل</button>
 
                                   {visit.status ===
                                     "waiting" && (
@@ -4701,7 +4908,7 @@ function App() {
                           0 && (
                           <tr>
                             <td
-                              colSpan={7}
+                              colSpan={8}
                             >
                               لا توجد زيارات مطابقة
                             </td>
@@ -5380,186 +5587,45 @@ function App() {
           selectedVisit && (
             <>
               <header className="topbar">
-                <div>
-                  <h1>
-                    تفاصيل الزيارة
-                  </h1>
-
-                  <p>
-                    جميع بيانات الزيارة
-                  </p>
-                </div>
-
+                <div><h1>تفاصيل الزيارة</h1><p>{editingVisit ? "تعديل معلومات الزيارة" : "جميع بيانات الزيارة"}</p></div>
                 <div className="top-actions">
-                  <button
-                    type="button"
-                    className="view-all"
-                    onClick={
-                      backToVisits
-                    }
-                  >
-                    ← العودة للزيارات
-                  </button>
+                  {!editingVisit && <button type="button" className="new-visit" onClick={() => openEditVisit(selectedVisit)}>✎ تعديل المعلومات</button>}
+                  <button type="button" className="view-all" onClick={backToVisits}>← العودة للزيارات</button>
                 </div>
               </header>
-
               <section className="visits-card">
-                <div className="section-header">
-                  <div>
-                    <h2>
-                      {
-                        selectedVisit.visitNo
-                      }
-                    </h2>
+                <div className="section-header"><div><h2>{selectedVisit.visitNo}</h2><p>{editingVisit ? "تعديل بيانات الزائر والشركة والتاريخ والشخص المطلوب والغرض" : "تفاصيل الزيارة المسجلة"}</p></div><span className={"status " + statusInfo(selectedVisit.status).className}><i />{statusInfo(selectedVisit.status).label}</span></div>
 
-                    <p>
-                      تفاصيل الزيارة المسجلة
-                    </p>
+                {!editingVisit ? (
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:"16px",marginTop:"24px"}}>
+                    {[
+                      ["رقم الزيارة", selectedVisit.visitNo],
+                      ["تاريخ الزيارة", formatVisitDate(selectedVisit.visitDate)],
+                      ["اسم الزائر", selectedVisit.visitorName],
+                      ["رقم الهاتف", selectedVisit.visitorPhone || "—"],
+                      ["البريد الإلكتروني", selectedVisit.visitorEmail || "—"],
+                      ["الشركة", selectedVisit.company],
+                      ["الشخص المطلوب", selectedVisit.employee],
+                      ["الغرض من الزيارة", selectedVisit.reason],
+                      ["وقت الدخول", selectedVisit.checkIn ? formatVisitTime(selectedVisit.checkIn) : "لم يتم الدخول"],
+                      ["وقت الخروج", selectedVisit.checkOut ? formatVisitTime(selectedVisit.checkOut) : "لم يتم الخروج"],
+                    ].map(([label,value]) => <div key={label} style={{padding:"18px",border:"1px solid #e5e7eb",borderRadius:"12px",background:"#fff"}}><div style={{color:"#6b7280",fontSize:"12px",fontWeight:700,marginBottom:"7px"}}>{label}</div><strong style={{wordBreak:"break-word"}}>{value}</strong></div>)}
                   </div>
+                ) : (
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:"16px",marginTop:"24px"}}>
+                    <div><label style={{display:"block",marginBottom:"8px",fontSize:"13px",fontWeight:700,color:"#374151"}}>اسم الزائر *</label><input value={editVisitName} onChange={(event)=>setEditVisitName(event.target.value)} style={formInputStyle} /></div>
+                    <div><label style={{display:"block",marginBottom:"8px",fontSize:"13px",fontWeight:700,color:"#374151"}}>رقم الهاتف</label><input value={editVisitPhone} onChange={(event)=>setEditVisitPhone(event.target.value)} style={formInputStyle} /></div>
+                    <div><label style={{display:"block",marginBottom:"8px",fontSize:"13px",fontWeight:700,color:"#374151"}}>البريد الإلكتروني</label><input type="email" value={editVisitEmail} onChange={(event)=>setEditVisitEmail(event.target.value)} style={formInputStyle} /></div>
+                    <div><label style={{display:"block",marginBottom:"8px",fontSize:"13px",fontWeight:700,color:"#374151"}}>تاريخ الزيارة *</label><input type="date" value={editVisitDate} onChange={(event)=>setEditVisitDate(event.target.value)} style={formInputStyle} /></div>
+                    <div><label style={{display:"block",marginBottom:"8px",fontSize:"13px",fontWeight:700,color:"#374151"}}>الشركة *</label><select value={editVisitCompanyId === null ? "personal" : String(editVisitCompanyId)} onChange={(event)=>setEditVisitCompanyId(event.target.value === "personal" ? null : Number(event.target.value))} style={formInputStyle}><option value="personal">شخصي</option>{companies.filter((company) => company.active).map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}</select></div>
+                    <div><label style={{display:"block",marginBottom:"8px",fontSize:"13px",fontWeight:700,color:"#374151"}}>الشخص المطلوب *</label><input value={editVisitEmployee} onChange={(event)=>setEditVisitEmployee(event.target.value)} style={formInputStyle} /></div>
+                    <div style={{gridColumn:"1 / -1"}}><label style={{display:"block",marginBottom:"8px",fontSize:"13px",fontWeight:700,color:"#374151"}}>الغرض من الزيارة *</label><input value={editVisitReason} onChange={(event)=>setEditVisitReason(event.target.value)} style={formInputStyle} /></div>
+                  </div>
+                )}
 
-                  <span
-                    className={
-                      "status " +
-                      statusInfo(
-                        selectedVisit.status,
-                      ).className
-                    }
-                  >
-                    <i />
-
-                    {
-                      statusInfo(
-                        selectedVisit.status,
-                      ).label
-                    }
-                  </span>
-                </div>
-
-                <div
-                  style={{
-                    display:
-                      "grid",
-                    gridTemplateColumns:
-                      "repeat(2, minmax(0, 1fr))",
-                    gap:
-                      "16px",
-                    marginTop:
-                      "24px",
-                  }}
-                >
-                  {[
-                    [
-                      "رقم الزيارة",
-                      selectedVisit.visitNo,
-                    ],
-                    [
-                      "تاريخ الزيارة",
-                      formatVisitDate(
-                        selectedVisit.visitDate,
-                      ),
-                    ],
-                    [
-                      "اسم الزائر",
-                      selectedVisit.visitorName,
-                    ],
-                    [
-                      "رقم الهاتف",
-                      selectedVisit.visitorPhone ||
-                        "—",
-                    ],
-                    [
-                      "البريد الإلكتروني",
-                      selectedVisit.visitorEmail ||
-                        "—",
-                    ],
-                    [
-                      "الشركة",
-                      selectedVisit.company,
-                    ],
-                    [
-                      "الشخص المطلوب",
-                      selectedVisit.employee,
-                    ],
-                    [
-                      "الغرض من الزيارة",
-                      selectedVisit.reason,
-                    ],
-                    [
-                      "وقت الدخول",
-                      selectedVisit.checkIn
-                        ? formatVisitTime(
-                            selectedVisit.checkIn,
-                          )
-                        : "لم يتم الدخول",
-                    ],
-                    [
-                      "وقت الخروج",
-                      selectedVisit.checkOut
-                        ? formatVisitTime(
-                            selectedVisit.checkOut,
-                          )
-                        : "لم يتم الخروج",
-                    ],
-                  ].map(
-                    ([label, value]) => (
-                      <div
-                        key={label}
-                        style={{
-                          padding:
-                            "18px",
-                          border:
-                            "1px solid #e5e7eb",
-                          borderRadius:
-                            "12px",
-                          background:
-                            "#fff",
-                        }}
-                      >
-                        <div
-                          style={{
-                            color:
-                              "#6b7280",
-                            fontSize:
-                              "12px",
-                            fontWeight:
-                              700,
-                            marginBottom:
-                              "7px",
-                          }}
-                        >
-                          {label}
-                        </div>
-
-                        <strong
-                          style={{
-                            wordBreak:
-                              "break-word",
-                          }}
-                        >
-                          {value}
-                        </strong>
-                      </div>
-                    ),
-                  )}
-                </div>
-
-                <div
-                  style={{
-                    display:
-                      "flex",
-                    marginTop:
-                      "24px",
-                  }}
-                >
-                  <button
-                    type="button"
-                    className="view-all"
-                    onClick={
-                      backToVisits
-                    }
-                  >
-                    ← العودة للزيارات
-                  </button>
+                {visitEditError && editingVisit && <div style={{marginTop:"16px",padding:"11px 14px",borderRadius:"9px",background:"#fef2f2",border:"1px solid #fecaca",color:"#b91c1c",fontSize:"13px",fontWeight:600}}>{visitEditError}</div>}
+                <div style={{display:"flex",gap:"10px",marginTop:"24px"}}>
+                  {editingVisit ? <><button type="button" className="view-all" disabled={savingVisitEdit} onClick={cancelEditVisit}>إلغاء</button><button type="button" className="new-visit" disabled={savingVisitEdit} onClick={()=>void saveVisitEdit()}>{savingVisitEdit ? "جاري الحفظ..." : "حفظ التعديل"}</button></> : <button type="button" className="view-all" onClick={backToVisits}>← العودة للزيارات</button>}
                 </div>
               </section>
             </>
@@ -5743,13 +5809,14 @@ function App() {
                 <p>استخراج بيانات الزيارات حسب الفلاتر</p>
               </div>
               <div className="top-actions">
-                <select value={reportSection} onChange={(event) => setReportSection(event.target.value as "visits" | "mail" | "calls" | "appointments")} style={{height:"42px",border:"1px solid #d1d5db",borderRadius:"9px",padding:"0 12px",background:"#fff"}}>
+                <select value={reportSection} onChange={(event) => setReportSection(event.target.value as "visits" | "mail" | "calls" | "appointments" | "companies")} style={{height:"42px",border:"1px solid #d1d5db",borderRadius:"9px",padding:"0 12px",background:"#fff"}}>
                   <option value="visits">تقرير الزيارات</option>
                   <option value="mail">تقرير البريد</option>
                   <option value="calls">تقرير الاتصالات</option>
                   <option value="appointments">تقرير المواعيد</option>
+                  <option value="companies">تقرير الشركات</option>
                 </select>
-                <button type="button" className="new-visit" onClick={() => { if (reportSection === "mail") exportMailToExcel(); else if (reportSection === "calls") exportCallsToExcel(); else if (reportSection === "appointments") exportAppointmentsToExcel(); else exportVisitsToExcel(); }}>تصدير Excel</button>
+                <button type="button" className="new-visit" onClick={() => { if (reportSection === "mail") exportMailToExcel(); else if (reportSection === "calls") exportCallsToExcel(); else if (reportSection === "appointments") exportAppointmentsToExcel(); else if (reportSection === "companies") exportCompaniesToExcel(); else exportVisitsToExcel(); }}>تصدير Excel</button>
               </div>
             </header>
 
@@ -5759,6 +5826,7 @@ function App() {
                 ["mail", "البريد"],
                 ["calls", "الاتصالات"],
                 ["appointments", "المواعيد"],
+                ["companies", "الشركات"],
               ] as const).map(([value, label]) => (
                 <button key={value} type="button" className={value === reportSection ? "new-visit" : "filter-button"} onClick={() => setReportSection(value)}>{label}</button>
               ))}
@@ -5779,6 +5847,7 @@ function App() {
               </div>
 
               <div className="filters">
+                <div className="search-box"><span>⌕</span><input value={reportVisitSearch} onChange={(event) => setReportVisitSearch(event.target.value)} placeholder="ابحث برقم الزيارة أو الزائر أو الشركة أو الموظف..." /></div>
                 <label style={{display:"flex",alignItems:"center",gap:"7px",fontSize:"13px",fontWeight:700,color:"#374151"}}>
                   من تاريخ
                   <input
@@ -5936,6 +6005,10 @@ function App() {
                       </th>
 
                       <th>
+                        البريد الإلكتروني
+                      </th>
+
+                      <th>
                         الشركة
                       </th>
 
@@ -5980,6 +6053,10 @@ function App() {
                             </td>
 
                             <td>
+                              {visit.visitorEmail || "—"}
+                            </td>
+
+                            <td>
                               {
                                 visit.company
                               }
@@ -6005,7 +6082,7 @@ function App() {
                       0 && (
                       <tr>
                         <td
-                          colSpan={5}
+                          colSpan={6}
                         >
                           لا توجد بيانات مطابقة
                         </td>
@@ -6015,6 +6092,24 @@ function App() {
                 </table>
               </div>
             </section>
+            )}
+
+            {reportSection === "companies" && (
+              <section className="visits-card">
+                <div className="section-header"><div><h2>تقرير الشركات</h2><p>اسم الشركة والبريد الإلكتروني الذي أدخله الزائر</p></div></div>
+                <div className="filters">
+                  <div className="search-box"><span>⌕</span><input value={companyReportSearch} onChange={(event) => setCompanyReportSearch(event.target.value)} placeholder="ابحث باسم الشركة أو البريد الإلكتروني..." /></div>
+                  <select value={companyReportEmailFilter} onChange={(event) => setCompanyReportEmailFilter(event.target.value as "all" | "withEmail" | "withoutEmail")} style={{height:"42px",border:"1px solid #d1d5db",borderRadius:"9px",padding:"0 12px",background:"#fff"}}>
+                    <option value="all">كل الشركات</option>
+                    <option value="withEmail">شركات لديها إيميل</option>
+                    <option value="withoutEmail">شركات بدون إيميل</option>
+                  </select>
+                </div>
+                <div className="table-wrapper"><table><thead><tr><th>اسم الشركة</th><th>البريد الإلكتروني</th></tr></thead><tbody>
+                  {filteredCompanyReport.map((company) => <tr key={company.id}><td><strong>{company.name}</strong></td><td>{company.email || "—"}</td></tr>)}
+                  {filteredCompanyReport.length === 0 && <tr><td colSpan={2}>لا توجد شركات مطابقة</td></tr>}
+                </tbody></table></div>
+              </section>
             )}
 
             {reportSection === "mail" && (
@@ -8198,6 +8293,11 @@ function App() {
                   savingCompany
                 }
               />
+            </div>
+
+            <div style={{ marginTop: "18px" }}>
+              <label style={{display:"block",marginBottom:"8px",fontSize:"13px",fontWeight:700,color:"#374151"}}>البريد الإلكتروني للشركة</label>
+              <input type="email" value={companyFormEmail} onChange={(event) => setCompanyFormEmail(event.target.value)} placeholder="example@company.com" style={formInputStyle} disabled={savingCompany} />
             </div>
 
             <label
